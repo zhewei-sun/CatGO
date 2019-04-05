@@ -2,6 +2,8 @@
 #import pickle
 import multiprocessing
 import time
+import re
+import tqdm
 
 import numpy as np
 #import pandas as pd
@@ -14,18 +16,13 @@ from scipy.optimize import minimize
 #from nltk.corpus import stopwords as sw
 #from gensim.utils import simple_preprocess
 
-from util import log_likelihood#, normalize
+from util import log_likelihood, normalize
 
-def normalize(array, axis=1):
-    denoms = np.sum(array, axis=axis)
-    if axis == 1:
-        return array / denoms[:,np.newaxis]
-    if axis == 0:
-        return array / denoms[np.newaxis, :]
+cfre=re.compile(r'cf_(?P<model>.+)_(?P<k>[0-9]+)')
 
 class Categorizer:
     
-    def __init__(self, categories, exemplars, queries, query_labels, cf_query=None, cf_exemplars=None):
+    def __init__(self, categories, exemplars, queries, query_labels, cf_feats=None):
         
         # Category Names - V
         self.categories = np.asarray(categories)
@@ -39,9 +36,8 @@ class Categorizer:
         # Query Labels - N (vocab_inds)
         self.query_labels = np.asarray(query_labels)
         
-        # Collaborative Filtering Features for each Query - k * N
-        self.cf_query = cf_query
-        self.cf_exemplars = cf_exemplars
+        # Collaborative Filtering Features (distances between all category pairs) - V*V*x
+        self.cf_feats = cf_feats
         
         self.parameters = {}
         self.results = {}
@@ -94,17 +90,24 @@ class Categorizer:
         self.vd_prototype = -1*self.vd_prototype**2
 
         
-    def train_categorization(self, models=['onenn', 'ezemplar', 'prototyoe'], prior='uniform'):
+    def train_categorization(self, models=['onenn', 'exemplar', 'prototype'], prior='uniform'):
+        
+        # Preprocess
+        self.preprocess(models)
+        
+        # Fork - run_model
         for model in models:
-            # Preprocess
-            self.preprocess(models)
-            # Fork - run_model
             if model == 'onenn':
                 self.run_onenn(self.train_inds, self.test_inds, prior=prior, verbose=True)
             if model == 'exemplar':
                 self.run_exemplar(self.train_inds, self.test_inds, prior=prior, verbose=True)
             if model == 'prototype':
                 self.run_prototype(self.train_inds, self.test_inds, prior=prior, verbose=True)
+            cf_match = cfre.search(model)
+            if cf_match is not None:
+                self.run_cf(self.train_inds, self.test_inds, cf_match['model'], int(cf_match['k'])+1, prior=prior, verbose=True)
+           
+    def train_categorization(self, models=['onenn', 'exemplar', 'prototype'], prior='uniform'):
             
     def run_onenn(self, train_ind, test_ind, prior='uniform', verbose=False):
         kernel = lambda params,inds,verbose: self.search_kernel(self.search_onenn, params, [inds], prior_name=prior, verbose=verbose)
@@ -117,6 +120,10 @@ class Categorizer:
     def run_prototype(self, train_ind, test_ind, prior='uniform', verbose=False):
         kernel = lambda params,inds,verbose: self.search_kernel(self.search_prototype, params, [inds], prior_name=prior, verbose=verbose)
         self.run_model(kernel, 'prototype', [1], ((10**-2, 10**2),), train_ind, test_ind, verbose)
+        
+    def run_cf(self, train_ind, test_ind, model, k, prior='uniform', verbose=False):
+        kernel = lambda params,inds,verbose: self.search_kernel(self.search_cf, params, [inds, model, k], prior_name=prior, verbose=verbose)
+        self.run_model(kernel, 'cf_'+model+'_'+str(k-1), [1,1], ((10**-2, 10**2),(10**-2, 10**2),), train_ind, test_ind, verbose)
 
     def run_model(self, kernel, ker_name, init, bounds, train_ind, test_ind, verbose=False):
         
@@ -153,7 +160,7 @@ class Categorizer:
         p_posterior = l_posterior[np.arange(N), self.query_labels[inds]]
         
         if verbose:
-            print("[h = %f]" % likelihood_params[0]) #TODO: fix
+            print("[params = %s]" % str(likelihood_params))
             print("Log_likelihood: %f" % log_likelihood(p_posterior))
         
         return log_likelihood(p_posterior), l_posterior
@@ -188,6 +195,45 @@ class Categorizer:
         l_prototype = normalize(np.exp(self.vd_prototype[inds]/h), axis=1)
         
         return l_prototype
+    
+    def search_cf(self, params, args):#h_word, h_model, model, k, inds, verbose=True):
+        
+        h_model = params[0]
+        h_word = params[1]
+        
+        inds = args[0]
+        model = args[1]
+        k = args[2]
+        
+        N = inds.shape[0]
+    
+        if model == 'onenn' or model == 'prototype':
+            if model == 'onenn':
+                vd_model = self.vd_onenn
+            elif model == 'prototype':
+                vd_model = self.vd_prototype
+            vocab_dist = np.exp(vd_model[inds]/h_model)
+        
+        elif model == 'exemplar':
+            vocab_dist = np.zeros((N, self.N_cat))
+            for j in range(self.N_cat):
+                vocab_dist[:,j] = np.sum(np.exp(self.vd_exemplar[j][inds] / h_model ), axis=1)
+        #TODO: add prior
+        l_model = normalize(vocab_dist, axis=1)
+        
+        neighbors = np.zeros((self.N_cat, k), dtype=np.int32)
+        for i in range(self.N_cat):
+            neighbors[i,:] = np.argsort(self.cf_feats[0][i,:])[:k]
+            
+        vd_vocab = np.exp(-1*self.cf_feats[0]**2/h_word)
+        
+        vd_vocab_cache = normalize(np.stack([vd_vocab[np.arange(self.N_cat), neighbors[:,i]] for i in range(k)], axis=1), axis=1)
+
+        l_model_cache = np.reshape(l_model[:, neighbors[:,:k]], (N,-1))
+        vvc_flat = np.reshape(vd_vocab_cache, -1)
+        l_margin = normalize(np.sum(np.reshape(l_model_cache * vvc_flat, (N, self.N_cat, k)), axis=2), axis=1)
+
+        return l_margin
     
         
     def get_rankings(self, l_model, inds):
