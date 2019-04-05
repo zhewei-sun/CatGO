@@ -9,3 +9,4 @@ def normalize(array, axis=1):
         return array / denoms[:,np.newaxis]
     if axis == 0:
         return array / denoms[np.newaxis, :]
+
