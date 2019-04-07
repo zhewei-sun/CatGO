@@ -1,5 +1,3 @@
-#import io
-#import pickle
 import multiprocessing
 import time
 import re
@@ -40,6 +38,7 @@ class Categorizer:
         self.N_query = self.queries.shape[0]
         self.N_cat = self.categories.shape[0]
         self.E = self.queries.shape[1]
+        self.CF_dim = cf_feats.shape[0]
         
         self.prior = {'uniform': np.ones(self.N_cat) / float(self.N_cat)}
         
@@ -58,7 +57,7 @@ class Categorizer:
 #        self.vd_exemplar = []
 #        for i in range(self.N_cat):
 #            if verbose:
-#                if i%500==0 and i != 0:
+#                if i%500==0:
 #                    print(i)
 #            vd_dist = np.zeros((self.N_query, self.exemplars[i].shape[0]))
 #            for j in range(self.N_query):
@@ -80,7 +79,7 @@ class Categorizer:
         
         for i in range(self.N_query):
             if verbose:
-                if i%500==0 and i != 0:
+                if i%500==0:
                     print(i)
             self.vd_prototype[i] = np.linalg.norm(prototypes - self.queries[i], axis=1)
                 
@@ -116,17 +115,13 @@ class Categorizer:
         for model in models:
             if model == 'onenn':
                 self.processes[model] = multiprocessing.Process(target=self.run_onenn, args=[self.train_inds, self.test_inds, prior])
-                #self.run_onenn(self.train_inds, self.test_inds, prior=prior, verbose=True)
             if model == 'exemplar':
                 self.processes[model] = multiprocessing.Process(target=self.run_exemplar, args=[self.train_inds, self.test_inds, prior])
-                #self.run_exemplar(self.train_inds, self.test_inds, prior=prior, verbose=True)
             if model == 'prototype':
                 self.processes[model] = multiprocessing.Process(target=self.run_prototype, args=[self.train_inds, self.test_inds, prior])
-                #self.run_prototype(self.train_inds, self.test_inds, prior=prior, verbose=True)
             cf_match = cfre.search(model)
             if cf_match is not None:
                 self.processes[model] = multiprocessing.Process(target=self.run_cf, args=[self.train_inds, self.test_inds, cf_match['model'], int(cf_match['k'])+1, prior])
-                #self.run_cf(self.train_inds, self.test_inds, cf_match['model'], int(cf_match['k'])+1, prior=prior, verbose=True)
              
         for key, p in self.processes.items():
             print('Starting Process: '+key)
@@ -146,36 +141,38 @@ class Categorizer:
                 if not waiting:
                     break
                 time.sleep(5)
+                
+        # TODO: read return value, update parameters
             
     def kill_all_processes(self):
         for key, p in self.processes.items():
             if p.is_alive():
-                p.kill()
-                
+                p.kill()           
                 
     def run_onenn(self, train_ind, test_ind, prior='uniform', verbose=False):
         kernel = lambda params,inds,verbose: self.search_kernel(self.search_onenn, params, [inds], prior_name=prior, verbose=verbose)
-        self.run_model(kernel, 'onenn', [1], ((10**-2, 10**2),), train_ind, test_ind, prior_name=prior, verbose=verbose)
+        return self.run_model(kernel, 'onenn', [1], ((10**-2, 10**2),), train_ind, test_ind, prior_name=prior, verbose=verbose)
         
     def run_exemplar(self, train_ind, test_ind, prior='uniform', verbose=False):
         kernel = lambda params,inds,verbose: self.search_kernel(self.search_exemplar, params, [inds], prior_name=prior, verbose=verbose)
-        self.run_model(kernel, 'exemplar', [1], ((10**-2, 10**2),), train_ind, test_ind, prior_name=prior, verbose=verbose)
+        return self.run_model(kernel, 'exemplar', [1], ((10**-2, 10**2),), train_ind, test_ind, prior_name=prior, verbose=verbose)
     
     def run_prototype(self, train_ind, test_ind, prior='uniform', verbose=False):
         kernel = lambda params,inds,verbose: self.search_kernel(self.search_prototype, params, [inds], prior_name=prior, verbose=verbose)
-        self.run_model(kernel, 'prototype', [1], ((10**-2, 10**2),), train_ind, test_ind, prior_name=prior, verbose=verbose)
+        return self.run_model(kernel, 'prototype', [1], ((10**-2, 10**2),), train_ind, test_ind, prior_name=prior, verbose=verbose)
         
     def run_cf(self, train_ind, test_ind, model, k, prior='uniform', verbose=False):
-        kernel = lambda params,inds,verbose: self.search_kernel(self.search_cf, params, [inds, model, k], prior_name=prior, verbose=verbose)
-        self.run_model(kernel, 'cf_'+model+'_'+str(k-1), [1,1], ((10**-2, 10**2),(10**-2, 10**2),), train_ind, test_ind, prior_name=prior, verbose=verbose)
+        kernel = lambda params,inds,verbose: self.search_kernel(self.search_cf, params, [inds, model, k, prior], prior_name=prior, verbose=verbose)
+        cf_init = [1,1]# + (self.CF_dim-1) * [1.0/self.CF_dim]
+        cf_bounds = [(10**-2, 10**2),(10**-2, 10**2)]# + (self.CF_dim-1) * [(0,1)]
+        #print(cf_init)
+        #print(cf_bounds)
+        return self.run_model(kernel, 'cf_'+model+'_'+str(k-1), cf_init, cf_bounds, train_ind, test_ind, prior_name=prior, verbose=verbose)
 
     def run_model(self, kernel, ker_name, init, bounds, train_ind, test_ind, prior_name='uniform', verbose=False):
         
         # Minimizer
         result = minimize(lambda x:kernel(x, train_ind, verbose=verbose)[0], init, bounds=bounds)
-        
-        # Update Parameter
-        self.parameters[ker_name] = result.x
         
         # Save Results
         
@@ -191,6 +188,8 @@ class Categorizer:
         if verbose:
             print("Log_Likelihood (Train): " + str(nll_train))
             print("Log_Likelihood (Test): " + str(nll_test))
+            
+        return result.x
 
     
     def search_kernel(self, likelihood_func, likelihood_params, likelihood_args, prior_name='uniform', verbose=True):
@@ -240,30 +239,28 @@ class Categorizer:
         
         return l_prototype
     
-    def search_cf(self, params, args):#h_word, h_model, model, k, inds, verbose=True):
+    def search_cf(self, params, args):
         
         h_model = params[0]
         h_word = params[1]
+        #alphas = params[2]
         
         inds = args[0]
         model = args[1]
         k = args[2]
+        prior_name = args[3]
         
         N = inds.shape[0]
-    
-        if model == 'onenn' or model == 'prototype':
-            if model == 'onenn':
-                vd_model = self.vd_onenn
-            elif model == 'prototype':
-                vd_model = self.vd_prototype
-            vocab_dist = np.exp(vd_model[inds]/h_model)
         
-        elif model == 'exemplar':
-            vocab_dist = np.zeros((N, self.N_cat))
-            for j in range(self.N_cat):
-                vocab_dist[:,j] = np.sum(np.exp(self.vd_exemplar[j][inds] / h_model ), axis=1)
-        #TODO: add prior
-        l_model = normalize(vocab_dist, axis=1)
+        if model == 'onenn':
+            l_likelihood = self.search_onenn(params, args)
+        if model == 'prototype':
+            l_likelihood = self.search_prototype(params, args)
+        if model == 'exemplar':
+            l_likelihood = self.search_exemplar(params, args)
+        
+        p_prior = self.prior[prior_name]
+        l_model = normalize(l_likelihood * p_prior, axis=1)
         
         neighbors = np.zeros((self.N_cat, k), dtype=np.int32)
         for i in range(self.N_cat):
