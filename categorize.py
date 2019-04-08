@@ -95,14 +95,14 @@ class Categorizer:
         for i in trange(len(models)):
             model = models[i]
             if model == 'onenn':
-                self.run_onenn(self.train_inds, self.test_inds, prior=prior, verbose=False)
+                self.run_onenn(self.train_inds, self.test_inds, prior=prior, verbose=verbose)
             if model == 'exemplar':
-                self.run_exemplar(self.train_inds, self.test_inds, prior=prior, verbose=False)
+                self.run_exemplar(self.train_inds, self.test_inds, prior=prior, verbose=verbose)
             if model == 'prototype':
-                self.run_prototype(self.train_inds, self.test_inds, prior=prior, verbose=False)
+                self.run_prototype(self.train_inds, self.test_inds, prior=prior, verbose=verbose)
             cf_match = cfre.search(model)
             if cf_match is not None:
-                self.run_cf(self.train_inds, self.test_inds, cf_match['model'], int(cf_match['k'])+1, prior=prior, verbose=False)
+                self.run_cf(self.train_inds, self.test_inds, cf_match['model'], int(cf_match['k'])+1, prior=prior, verbose=verbose)
            
     def run_categorization_batch(self, models=['onenn', 'exemplar', 'prototype'], prior='uniform', verbose=False):
         # Preprocess
@@ -163,26 +163,31 @@ class Categorizer:
         
     def run_cf(self, train_ind, test_ind, model, k, prior='uniform', verbose=False):
         kernel = lambda params,inds,verbose: self.search_kernel(self.search_cf, params, [inds, model, k, prior], prior_name=prior, verbose=verbose)
-        cf_init = [1,1]# + (self.CF_dim-1) * [1.0/self.CF_dim]
-        cf_bounds = [(10**-2, 10**2),(10**-2, 10**2)]# + (self.CF_dim-1) * [(0,1)]
-        #print(cf_init)
-        #print(cf_bounds)
-        return self.run_model(kernel, 'cf_'+model+'_'+str(k-1), cf_init, cf_bounds, train_ind, test_ind, prior_name=prior, verbose=verbose)
+        cf_init = [1,1] + (self.CF_dim-1) * [1.0/self.CF_dim]
+        cf_bounds = [(10**-2, 10**2),(10**-2, 10**2)] + (self.CF_dim-1) * [(0,1)]
+        if self.CF_dim == 1:
+            cf_constraints = None
+        else:
+            cf_constraints = {'type': 'ineq', 'fun': lambda x: 1.0 - np.sum(x[2:]) }
+        return self.run_model(kernel, 'cf_'+model+'_'+str(k-1), cf_init, cf_bounds, train_ind, test_ind, prior_name=prior, constraints=cf_constraints, verbose=verbose)
 
-    def run_model(self, kernel, ker_name, init, bounds, train_ind, test_ind, prior_name='uniform', verbose=False):
+    def run_model(self, kernel, ker_name, init, bounds, train_ind, test_ind, prior_name='uniform', constraints=None, verbose=False):
         
         # Minimizer
-        result = minimize(lambda x:kernel(x, train_ind, verbose=verbose)[0], init, bounds=bounds)
-        
+        if constraints is None:
+            result = minimize(lambda x:kernel(x, train_ind, verbose)[0], init, bounds=bounds)
+        else:
+            result = minimize(lambda x:kernel(x, train_ind, verbose)[0], init, bounds=bounds, constraints=constraints)
+
         # Save Results
         
         if verbose:
             print("[params = "+str(result.x)+"]")
         
-        nll_train, likelihood_train = kernel(result.x, train_ind, verbose=False)
+        nll_train, likelihood_train = kernel(result.x, train_ind, verbose)
         np.save(self.data_dir+'l_'+ker_name+'_'+prior_name+'_train.npy', likelihood_train)
     
-        nll_test, likelihood_test = kernel(result.x, test_ind, verbose=False)
+        nll_test, likelihood_test = kernel(result.x, test_ind, verbose)
         np.save(self.data_dir+'l_'+ker_name+'_'+prior_name+'_test.npy', likelihood_test)
         
         if verbose:
@@ -192,7 +197,7 @@ class Categorizer:
         return result.x
 
     
-    def search_kernel(self, likelihood_func, likelihood_params, likelihood_args, prior_name='uniform', verbose=True):
+    def search_kernel(self, likelihood_func, likelihood_params, likelihood_args, prior_name='uniform', train=True, verbose=True):
         inds = likelihood_args[0]
         N = inds.shape[0]
         
@@ -243,7 +248,10 @@ class Categorizer:
         
         h_model = params[0]
         h_word = params[1]
-        #alphas = params[2]
+        if len(params) > 2:
+            alphas = np.asarray(params[2:]+[1-np.sum(params[2:])])[:, np.newaxis, np.newaxis]
+        else:
+            alphas = np.asarray([1])[:, np.newaxis, np.newaxis]
         
         inds = args[0]
         model = args[1]
@@ -262,11 +270,13 @@ class Categorizer:
         p_prior = self.prior[prior_name]
         l_model = normalize(l_likelihood * p_prior, axis=1)
         
+        cf_feats_weighted = np.sum(self.cf_feats * alphas, axis=0)
+        
         neighbors = np.zeros((self.N_cat, k), dtype=np.int32)
         for i in range(self.N_cat):
-            neighbors[i,:] = np.argsort(self.cf_feats[0][i,:])[:k]
+            neighbors[i,:] = np.argsort(cf_feats_weighted[i,:])[:k]
             
-        vd_vocab = np.exp(-1*self.cf_feats[0]**2/h_word)
+        vd_vocab = np.exp(-1*cf_feats_weighted**2/h_word)
         
         vd_vocab_cache = normalize(np.stack([vd_vocab[np.arange(self.N_cat), neighbors[:,i]] for i in range(k)], axis=1), axis=1)
 
