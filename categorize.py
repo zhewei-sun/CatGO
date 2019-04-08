@@ -1,3 +1,4 @@
+import pickle
 import multiprocessing
 import time
 import re
@@ -49,6 +50,11 @@ class Categorizer:
     def set_datadir(self, data_dir):
         self.data_dir = data_dir
         
+    def save_parameters(self):
+        param_file = open(self.data_dir+"parameters.pkl","wb")
+        pickle.dump(self.parameters,param_file)
+        param_file.close()
+        
     def add_prior(self, name, p_prior):
         self.prior[name] = p_prior
         
@@ -95,15 +101,17 @@ class Categorizer:
         for i in trange(len(models)):
             model = models[i]
             if model == 'onenn':
-                self.run_onenn(self.train_inds, self.test_inds, prior=prior, verbose=verbose)
+                self.run_onenn(None, self.train_inds, self.test_inds, prior=prior, verbose=verbose)
             if model == 'exemplar':
-                self.run_exemplar(self.train_inds, self.test_inds, prior=prior, verbose=verbose)
+                self.run_exemplar(None, self.train_inds, self.test_inds, prior=prior, verbose=verbose)
             if model == 'prototype':
-                self.run_prototype(self.train_inds, self.test_inds, prior=prior, verbose=verbose)
+                self.run_prototype(None, self.train_inds, self.test_inds, prior=prior, verbose=verbose)
             cf_match = cfre.search(model)
             if cf_match is not None:
-                self.run_cf(self.train_inds, self.test_inds, cf_match['model'], int(cf_match['k'])+1, prior=prior, verbose=verbose)
+                self.run_cf(None, self.train_inds, self.test_inds, cf_match['model'], int(cf_match['k'])+1, prior=prior, verbose=verbose)
            
+        self.save_parameters()
+        
     def run_categorization_batch(self, models=['onenn', 'exemplar', 'prototype'], prior='uniform', verbose=False):
         # Preprocess
         self.preprocess(models, verbose=verbose)
@@ -112,16 +120,18 @@ class Categorizer:
         self.kill_all_processes()
         self.processes = {}
         
+        q = multiprocessing.Queue()
+        
         for model in models:
             if model == 'onenn':
-                self.processes[model] = multiprocessing.Process(target=self.run_onenn, args=[self.train_inds, self.test_inds, prior])
+                self.processes[model] = multiprocessing.Process(target=self.run_onenn, args=[q, self.train_inds, self.test_inds, prior])
             if model == 'exemplar':
-                self.processes[model] = multiprocessing.Process(target=self.run_exemplar, args=[self.train_inds, self.test_inds, prior])
+                self.processes[model] = multiprocessing.Process(target=self.run_exemplar, args=[q, self.train_inds, self.test_inds, prior])
             if model == 'prototype':
-                self.processes[model] = multiprocessing.Process(target=self.run_prototype, args=[self.train_inds, self.test_inds, prior])
+                self.processes[model] = multiprocessing.Process(target=self.run_prototype, args=[q, self.train_inds, self.test_inds, prior])
             cf_match = cfre.search(model)
             if cf_match is not None:
-                self.processes[model] = multiprocessing.Process(target=self.run_cf, args=[self.train_inds, self.test_inds, cf_match['model'], int(cf_match['k'])+1, prior])
+                self.processes[model] = multiprocessing.Process(target=self.run_cf, args=[q, self.train_inds, self.test_inds, cf_match['model'], int(cf_match['k'])+1, prior])
              
         for key, p in self.processes.items():
             print('Starting Process: '+key)
@@ -142,26 +152,35 @@ class Categorizer:
                     break
                 time.sleep(5)
                 
-        # TODO: read return value, update parameters
+        # Read return value, update parameters
+        for key, p in self.processes.items():
+            p.join()
+            
+        for i in range(len(self.processes)):
+            res = q.get()
+            self.parameters[res[0]] = res[1]
+            
+        self.save_parameters()
+        
             
     def kill_all_processes(self):
         for key, p in self.processes.items():
             if p.is_alive():
                 p.kill()           
                 
-    def run_onenn(self, train_ind, test_ind, prior='uniform', verbose=False):
+    def run_onenn(self, q, train_ind, test_ind, prior='uniform', verbose=False):
         kernel = lambda params,inds,verbose: self.search_kernel(self.search_onenn, params, [inds], prior_name=prior, verbose=verbose)
-        return self.run_model(kernel, 'onenn', [1], ((10**-2, 10**2),), train_ind, test_ind, prior_name=prior, verbose=verbose)
+        self.run_model(kernel, 'onenn', [1], ((10**-2, 10**2),), train_ind, test_ind, q, prior_name=prior, verbose=verbose)
         
-    def run_exemplar(self, train_ind, test_ind, prior='uniform', verbose=False):
+    def run_exemplar(self, q, train_ind, test_ind, prior='uniform', verbose=False):
         kernel = lambda params,inds,verbose: self.search_kernel(self.search_exemplar, params, [inds], prior_name=prior, verbose=verbose)
-        return self.run_model(kernel, 'exemplar', [1], ((10**-2, 10**2),), train_ind, test_ind, prior_name=prior, verbose=verbose)
+        self.run_model(kernel, 'exemplar', [1], ((10**-2, 10**2),), train_ind, test_ind, q, prior_name=prior, verbose=verbose)
     
-    def run_prototype(self, train_ind, test_ind, prior='uniform', verbose=False):
+    def run_prototype(self, q, train_ind, test_ind, prior='uniform', verbose=False):
         kernel = lambda params,inds,verbose: self.search_kernel(self.search_prototype, params, [inds], prior_name=prior, verbose=verbose)
-        return self.run_model(kernel, 'prototype', [1], ((10**-2, 10**2),), train_ind, test_ind, prior_name=prior, verbose=verbose)
+        self.run_model(kernel, 'prototype', [1], ((10**-2, 10**2),), train_ind, test_ind, q, prior_name=prior, verbose=verbose)
         
-    def run_cf(self, train_ind, test_ind, model, k, prior='uniform', verbose=False):
+    def run_cf(self, q, train_ind, test_ind, model, k, prior='uniform', verbose=False):
         kernel = lambda params,inds,verbose: self.search_kernel(self.search_cf, params, [inds, model, k, prior], prior_name=prior, verbose=verbose)
         cf_init = [1,1] + (self.CF_dim-1) * [1.0/self.CF_dim]
         cf_bounds = [(10**-2, 10**2),(10**-2, 10**2)] + (self.CF_dim-1) * [(0,1)]
@@ -169,9 +188,9 @@ class Categorizer:
             cf_constraints = None
         else:
             cf_constraints = {'type': 'ineq', 'fun': lambda x: 1.0 - np.sum(x[2:]) }
-        return self.run_model(kernel, 'cf_'+model+'_'+str(k-1), cf_init, cf_bounds, train_ind, test_ind, prior_name=prior, constraints=cf_constraints, verbose=verbose)
+        self.run_model(kernel, 'cf_'+model+'_'+str(k-1), cf_init, cf_bounds, train_ind, test_ind, q, prior_name=prior, constraints=cf_constraints, verbose=verbose)
 
-    def run_model(self, kernel, ker_name, init, bounds, train_ind, test_ind, prior_name='uniform', constraints=None, verbose=False):
+    def run_model(self, kernel, ker_name, init, bounds, train_ind, test_ind, q, prior_name='uniform', constraints=None, verbose=False):
         
         # Minimizer
         if constraints is None:
@@ -193,8 +212,11 @@ class Categorizer:
         if verbose:
             print("Log_Likelihood (Train): " + str(nll_train))
             print("Log_Likelihood (Test): " + str(nll_test))
-            
-        return result.x
+        
+        if q is not None:
+            q.put([ker_name, result.x])
+        else:
+            self.parameters[ker_name] = result.x
 
     
     def search_kernel(self, likelihood_func, likelihood_params, likelihood_args, prior_name='uniform', train=True, verbose=True):
