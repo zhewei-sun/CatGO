@@ -12,6 +12,30 @@ Please consider citing the above paper if you find this package to be useful.
 
 ### Quick Starter Guide
 
+To use the library, you'll need to install the following dependencies:
+
+- Python 3
+- Numpy
+- Scipy
+- Matplotlib
+- Tqdm
+
+Most of which should be available in a standard scientific python distribution.
+
+To run the code, simply download this repo and create a symbolic link in your code's home directory:
+
+```
+ln -s [Directory of the CatGO repo] CatGO
+```
+
+Then simply import the library within your code. No installation required!
+
+```
+from CatGO import categorize
+```
+
+### Documentation
+
 ```
 Categorizer(categories, exemplars, queries, query_labels, cf_feats=None)
 ```
