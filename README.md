@@ -18,7 +18,7 @@ To use the library, you'll need to install the following dependencies:
 - Numpy
 - Scipy
 - Matplotlib
-- Tqdm
+- tqdm
 
 Most of which should be available in a standard scientific python distribution.
 
