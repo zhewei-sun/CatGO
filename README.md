@@ -3,7 +3,7 @@ CatGO is a light-weight Python library for categorization models.
 
 A full tutorial can be found in the /tutorial directory, where I demo the code on image categorization.
 
-The models implemented in this package are described in detail in the following paper, with one exception that instead of summing all stimuli in the exemplar model, we compute an average.
+The models implemented in this package are described in detail in the following paper, with one exception that instead of summing all examples in the exemplar model, we compute an average.
 
 
 [Sun et al. (2019) - Slang Generation as Categorization](http://www.cs.toronto.edu/~zheweisun/files/cogsci19_slang.pdf)
@@ -28,7 +28,7 @@ To run the code, simply download this repo and create a symbolic link in your co
 ln -s [Directory of the CatGO repo] CatGO
 ```
 
-Then simply import the library within your code. No installation required!
+Then import the library within your code. No installation required!
 
 ```
 from CatGO import categorize
@@ -46,11 +46,11 @@ This is the main constructor where all model inputs are passed in:
 
 - *exemplars* - A nested array of exemplar vectors. The *i*'th element in the array should be an array containing all exemplars corresponding to category *i* as specified in *categories*.
 
-- *queries* - An array of vectors containing all stimuli to be queried. This can be further split into a training set for parameter estimation and a test set for evaluation.
+- *queries* - An array of vectors containing all examples to be queried. This can be further split into a training set for parameter estimation and a test set for evaluation.
 
 - *query_labels* - An array of integer containing the category labels for all examples in *queries*, corresponding to the order specified in *categories*.
 
-- *cf_feats* - A 3D matrix of category similarity to be used in collaborative filtering. Each sub-matrix should be of size N x N where N is the number of categories, and should specify the distances between all pairs of categories. The variable should be of shape k x N x N, where k is the number of feature maps to be used.
+- *cf_feats* - A 3D matrix of inter-category similarities to be used in collaborative filtering. Each sub-matrix should be of size N x N where N is the number of categories, and should specify the distances between all pairs of categories. The variable should be of shape k x N x N, where k is the number of feature maps to be used.
 
 ```
 categorizer.set_inds(train_inds, test_inds)
@@ -116,10 +116,10 @@ categorizer.compute_results(models=['onenn', 'exemplar', 'prototype'], prior='un
 Computes the following metrics on training and testing examples from *queries* for the prior and all specified kernels:
 
 1. Negative log likelihood
-2. AUC
+2. Area under the ROC curve (AUC)
 3. Expected Rank
 
-- *models* - A list of kernels where results needs to be computed. All kernels specified here should be optimized beforehand using *categorizer.run_categorization*.
+- *models* - A list of kernels in which results need to be computed. All kernels specified here should be optimized beforehand using *categorizer.run_categorization*.
 
 - *prior* - The prior to use for all categorization models.
 
@@ -129,7 +129,7 @@ categorizer.summarize(models=['onenn', 'exemplar', 'prototype'], prior='uniform'
 
 Summarizes the results computed in *categorizer.compute_results*.
 
-- *models* - A list of kernels where results needs to be summarized. All kernels specified here should be optimized beforehand using *categorizer.run_categorization* and have results computed using *categorizer.compute_results*.
+- *models* - A list of kernels where results need to be summarized. All kernels specified here should be optimized beforehand using *categorizer.run_categorization* and have results computed using *categorizer.compute_results*.
 
 - *prior* - The prior to use for all categorization models.
 
