@@ -9,7 +9,6 @@ from scipy.optimize import minimize
 from tqdm import trange
 
 from .util import log_likelihood, normalize
-#from util import log_likelihood, normalize
 
 cfre=re.compile(r'cf_(?P<model>.+)_(?P<k>[0-9]+)')
 
@@ -363,43 +362,83 @@ class Categorizer:
         return roc / rankings.shape[0]
         
     
-    def compute_results(self, models=['onenn', 'exemplar', 'prototype'], prior='uniform'):
+    def compute_results(self, models=['onenn', 'exemplar', 'prototype'], metrics=['nll', 'auc', 'erank'], prior='uniform'):
         
-        self.results['random'] = {'nll_train': log_likelihood(np.ones(self.train_inds.shape[0])/self.N_cat), \
+        self.results['random'] = {'metrics': set(['nll', 'auc', 'erank', 'classify']), \
+                          'nll_train': log_likelihood(np.ones(self.train_inds.shape[0])/self.N_cat), \
                           'nll_test': log_likelihood(np.ones(self.test_inds.shape[0])/self.N_cat), \
                           'rank_train': self.N_cat/2.0, \
                           'rank_test': self.N_cat/2.0, \
                           'roc_train': np.asarray([(i/float(self.N_cat)) for i in range(self.N_cat+1)]), \
-                          'roc_test': np.asarray([(i/float(self.N_cat)) for i in range(self.N_cat+1)])}
+                          'roc_test': np.asarray([(i/float(self.N_cat)) for i in range(self.N_cat+1)]), \
+                          'acc_train': 1.0 / self.N_cat, \
+                          'acc_test': 1.0 / self.N_cat }
         
         for model in models:
-            self.results[model] = {}
+            if model not in self.results:
+                self.results[model] = {'metrics':set()}
             
             l_model_train = np.load(self.data_dir+'l_'+model+'_'+prior+'_train.npy')
             train_rankings = self.get_rankings(l_model_train, self.train_inds)
-            self.results[model]['nll_train'] = log_likelihood(l_model_train[np.arange(self.train_inds.shape[0]), self.query_labels[self.train_inds]])
-            self.results[model]['rank_train'] = np.mean(train_rankings)
-            self.results[model]['roc_train'] = self.get_roc(train_rankings)
             
             l_model_test = np.load(self.data_dir+'l_'+model+'_'+prior+'_test.npy')
             test_rankings = self.get_rankings(l_model_test, self.test_inds)
-            self.results[model]['nll_test'] = log_likelihood(l_model_test[np.arange(self.test_inds.shape[0]), self.query_labels[self.test_inds]])
-            self.results[model]['rank_test'] = np.mean(test_rankings)
-            self.results[model]['roc_test'] = self.get_roc(test_rankings)
-    
-    def summarize_model(self, model):
-        print('['+model.upper()+']')
-        print("Log_Likelihood (Train): " + str(self.results[model]['nll_train']))
-        print("Log_Likelihood (Test): " + str(self.results[model]['nll_test']))
-        print("AUC (Train): " + str(np.mean(self.results[model]['roc_train'])))
-        print("AUC (Test): " + str(np.mean(self.results[model]['roc_test'])))
-        print("Expected_Rank (Train): " + str(self.results[model]['rank_train']))
-        print("Expected_Rank (Test): " + str(self.results[model]['rank_test']))
-    
-    def summarize(self, models=['onenn', 'exemplar', 'prototype'], prior='uniform'):
+            
+            for metric in metrics:
+                
+                if metric in self.results['random']['metrics']:
+                    self.results[model]['metrics'].add(metric)
+                else:
+                    continue
+                
+                if metric == 'nll':
+                    self.results[model]['nll_train'] = log_likelihood(l_model_train[np.arange(self.train_inds.shape[0]), self.query_labels[self.train_inds]])
+                    self.results[model]['nll_test'] = log_likelihood(l_model_test[np.arange(self.test_inds.shape[0]), self.query_labels[self.test_inds]])
         
-        self.summarize_model('random')
+                if metric == 'erank':
+                    self.results[model]['rank_train'] = np.mean(train_rankings)
+                    self.results[model]['rank_test'] = np.mean(test_rankings)
+            
+                if metric == 'auc':
+                    self.results[model]['roc_train'] = self.get_roc(train_rankings)
+                    self.results[model]['roc_test'] = self.get_roc(test_rankings)
+            
+                if metric == 'classify':
+                    self.results[model]['acc_train'] = np.sum(train_rankings==1) / float(len(self.train_inds))
+                    self.results[model]['acc_test'] = np.sum(test_rankings==1) / float(len(self.test_inds))
+            
+
+    
+    def summarize_model(self, model, metrics):
+        
+        if model not in self.results:
+            print("[Warning] Kernel "+model+" does not exist or has not been optimized.")
+            return
+        
+        if len(metrics) > 0:
+            print('['+model.upper()+']')
+        
+        for metric in metrics:
+            if metric not in self.results[model]['metrics']:
+                print("[Warning] Metric "+metric+" does not exist or has not been computed.")
+                continue
+            if metric == 'nll':
+                print("Log_Likelihood (Train): " + str(self.results[model]['nll_train']))
+                print("Log_Likelihood (Test): " + str(self.results[model]['nll_test']))
+            if metric == 'auc':
+                print("AUC (Train): " + str(np.mean(self.results[model]['roc_train'])))
+                print("AUC (Test): " + str(np.mean(self.results[model]['roc_test'])))
+            if metric == 'erank':
+                print("Expected_Rank (Train): " + str(self.results[model]['rank_train']))
+                print("Expected_Rank (Test): " + str(self.results[model]['rank_test']))
+            if metric == 'classify':
+                print("Classification Accuracy (Train): " + str(self.results[model]['acc_train']))
+                print("Classification Accuracy (Test): " + str(self.results[model]['acc_test']))
+    
+    def summarize(self, models=['onenn', 'exemplar', 'prototype'], metrics=['nll', 'auc', 'erank'], prior='uniform'):
+        
+        self.summarize_model('random', metrics)
         
         for model in models:
-            self.summarize_model(model)
+            self.summarize_model(model, metrics)
         

@@ -1,4 +1,7 @@
 ﻿# CatGO - Python Library for Categorization
+
+#### By: [Zhewei Sun](http://www.cs.toronto.edu/~zheweisun/)
+
 CatGO is a light-weight Python library for categorization models.
 
 A full tutorial can be found in the /tutorial directory, where I demo the code on image categorization.
@@ -110,26 +113,31 @@ Same as *categorizer.run_categorization* except kernels are optimized in paralle
 - *prior* - The prior to use for all categorization models.
 
 ```
-categorizer.compute_results(models=['onenn', 'exemplar', 'prototype'], prior='uniform')
+categorizer.compute_results(models=['onenn', 'exemplar', 'prototype'], metrics=['nll', 'auc', 'erank'], prior='uniform')
 ```
 
 Computes the following metrics on training and testing examples from *queries* for the prior and all specified kernels:
 
-1. Negative log likelihood
-2. Area under the ROC curve (AUC)
-3. Expected Rank
+1. *nll* - Negative log likelihood
+2. *auc* - Area under the ROC curve (AUC)
+3. *erank* - Expected Rank
+4. *classify* - Classification Accuracy
 
 - *models* - A list of kernels in which results need to be computed. All kernels specified here should be optimized beforehand using *categorizer.run_categorization*.
+
+- *metrics* - A list of metrics to be computed.
 
 - *prior* - The prior to use for all categorization models.
 
 ```
-categorizer.summarize(models=['onenn', 'exemplar', 'prototype'], prior='uniform')
+categorizer.summarize(models=['onenn', 'exemplar', 'prototype'], metrics=['nll', 'auc', 'erank'], prior='uniform')
 ```
 
 Summarizes the results computed in *categorizer.compute_results*.
 
 - *models* - A list of kernels where results need to be summarized. All kernels specified here should be optimized beforehand using *categorizer.run_categorization* and have results computed using *categorizer.compute_results*.
+
+- *metrics* - A list of metrics to be displayed. All metrics should be computed beforehand using *categorizer.compute_results*.
 
 - *prior* - The prior to use for all categorization models.
 
