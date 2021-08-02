@@ -1,4 +1,4 @@
-﻿# CatGO - Python Library for Categorization
+# CatGO - Python Library for Categorization
 
 #### By: [Zhewei Sun](http://www.cs.toronto.edu/~zheweisun/)
 
@@ -40,7 +40,7 @@ from CatGO import categorize
 ### Documentation
 
 ```
-Categorizer(categories, exemplars, queries, query_labels, cf_feats=None)
+Categorizer(categories, exemplars, cf_feats=None)
 ```
 
 This is the main constructor where all model inputs are passed in:
@@ -49,21 +49,8 @@ This is the main constructor where all model inputs are passed in:
 
 - *exemplars* - A nested array of exemplar vectors. The *i*'th element in the array should be an array containing all exemplars corresponding to category *i* as specified in *categories*.
 
-- *queries* - An array of vectors containing all examples to be queried. This can be further split into a training set for parameter estimation and a test set for evaluation.
-
-- *query_labels* - An array of integer containing the category labels for all examples in *queries*, corresponding to the order specified in *categories*.
-
 - *cf_feats* - A 3D matrix of inter-category similarities to be used in collaborative filtering. Each sub-matrix should be of size N x N where N is the number of categories, and should specify the distances between all pairs of categories. The variable should be of shape k x N x N, where k is the number of feature maps to be used.
 
-```
-categorizer.set_inds(train_inds, test_inds)
-```
-
-Specifies indices for training-testing split of the queried examples. Indices should correspond to the input array *queries*.
-
-- *train_inds* - array specifying indices of examples to be used for model estimation.
-
-- *test_inds* - array specifying indices of examples to be used for prediction and evaluation.
 
 ```
 categorizer.set_datadir(data_dir)
@@ -84,7 +71,7 @@ Adds a custom prior distribution to be applied to the categorization models. By 
 - *l_prior* - An array of normalized probabilities for each of the N categories.
 
 ```
-categorizer.run_categorization(models=['onenn', 'exemplar', 'prototype'], prior='uniform')
+categorizer.run_categorization(queries, query_labels, models=['onenn', 'exemplar', 'prototype'], prior='uniform', mode='train')
 ```
 
 Optimizes all categorization kernels specified using the training examples from *queries*. The available kernels are:
@@ -98,22 +85,32 @@ Optimizes all categorization kernels specified using the training examples from 
 
 Where *k* is the number of neighbors to consider in collaborative filtering (e.g. cf_onenn_1, cf_prototype_5).
 
+- *queries* - An array of vectors containing all examples to be queried. This can be further split into a training set for parameter estimation and a test set for evaluation.
+
+- *query_labels* - An array of integer containing the category labels for all examples in *queries*, corresponding to the order specified in *categories*.
+
 - *models* - A list of kernels to be optimized.
 
 - *prior* - The prior to use for all categorization models.
 
+- *mode* - Determines the mode of execution and output file names. Parameters will only be optimized and saved if *mode=='train'*. Running  any other mode assumes that the model has already been trained (i.e. *parameter.pkl* has been saved on disk).
 ```
-categorizer.run_categorization_batch(models=['onenn', 'exemplar', 'prototype'], prior='uniform')
+categorizer.run_categorization_batch(models=['onenn', 'exemplar', 'prototype'], prior='uniform', mode='train')
 ```
 
 Same as *categorizer.run_categorization* except kernels are optimized in parallel.
 
+- *queries* - An array of vectors containing all examples to be queried. This can be further split into a training set for parameter estimation and a test set for evaluation.
+
+- *query_labels* - An array of integer containing the category labels for all examples in *queries*, corresponding to the order specified in *categories*.
+
 - *models* - A list of kernels to be optimized.
 
 - *prior* - The prior to use for all categorization models.
 
+- *mode* - Determines the mode of execution and output file names. Parameters will only be optimized and saved if *mode=='train'*. Running  any other mode assumes that the model has already been trained (i.e. *parameter.pkl* has been saved on disk).
 ```
-categorizer.compute_results(models=['onenn', 'exemplar', 'prototype'], metrics=['nll', 'auc', 'erank'], prior='uniform')
+categorizer.compute_metrics(query_labels, models=['onenn', 'exemplar', 'prototype'], metrics=['nll', 'auc', 'erank'], prior='uniform')
 ```
 
 Computes the following metrics on training and testing examples from *queries* for the prior and all specified kernels:
@@ -121,23 +118,22 @@ Computes the following metrics on training and testing examples from *queries* f
 1. *nll* - Negative log likelihood
 2. *auc* - Area under the ROC curve (AUC)
 3. *erank* - Expected Rank
-4. *classify* - Classification Accuracy
+
+- *query_labels* - An array of integer containing the category labels for all examples to be evaluated, corresponding to the order specified in *categories*.
 
 - *models* - A list of kernels in which results need to be computed. All kernels specified here should be optimized beforehand using *categorizer.run_categorization*.
 
-- *metrics* - A list of metrics to be computed.
-
 - *prior* - The prior to use for all categorization models.
 
+
 ```
-categorizer.summarize(models=['onenn', 'exemplar', 'prototype'], metrics=['nll', 'auc', 'erank'], prior='uniform')
+categorizer.summarize_results(query_labels, models=['onenn', 'exemplar', 'prototype'], prior='uniform')
 ```
 
-Summarizes the results computed in *categorizer.compute_results*.
+Calls *categorizer.compute_results* and summarizes the results.
+
+- *query_labels* - An array of integer containing the category labels for all examples to be evaluated, corresponding to the order specified in *categories*.
 
 - *models* - A list of kernels where results need to be summarized. All kernels specified here should be optimized beforehand using *categorizer.run_categorization* and have results computed using *categorizer.compute_results*.
 
-- *metrics* - A list of metrics to be displayed. All metrics should be computed beforehand using *categorizer.compute_results*.
-
 - *prior* - The prior to use for all categorization models.
-
