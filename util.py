@@ -1,3 +1,5 @@
+# Copyright (C) 2019-2021 Zhewei Sun
+
 import numpy as np
 
 def log_likelihood(p):
@@ -10,3 +12,8 @@ def normalize(array, axis=1):
     if axis == 0:
         return array / denoms[np.newaxis, :]
 
+def proto_only(models):
+    for model in models:
+        if 'prototype' not in model:
+            return False
+    return True
