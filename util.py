@@ -2,13 +2,11 @@
 
 import numpy as np
 
-ep = 0.00001
-
 def log_likelihood(p):
-    return -np.sum(np.log(p + ep))
+    return -np.sum(np.log(p))
 
 def normalize(array, axis=1):
-    denoms = np.sum(array, axis=axis) + ep
+    denoms = np.sum(array, axis=axis)
     if axis == 1:
         return array / denoms[:,np.newaxis]
     if axis == 0:
